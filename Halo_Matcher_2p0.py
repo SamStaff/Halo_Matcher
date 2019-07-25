@@ -1,10 +1,43 @@
 import numpy as np
-import time
+from scipy import stats
 from tqdm import tqdm
 import eagle3 as E
-from scipy import stats
-from sim_info import get_sim_info
-from Sim_Tools import duplicate_remover
+
+def duplicate_remover(arr, return_dup=False, return_index=False):
+
+	#Make sure array is sorted
+	arr = np.sort(arr)
+
+	#Find location of duplicates in array
+	index_dup = np.where(np.diff(arr, n=1) == 0)[0]
+
+	if len(index_dup) == 0:
+		print('No duplicates found in array')
+		return 0
+
+	#Find location where duplicates are different numbers
+	index_diff = np.where(np.diff(index_dup) != 1)[0]
+
+	''' Note, this will not currently include the index of the 
+        last duplicate of each number, thus must add this '''
+	index_diff = np.append(index_diff, len(index_dup)-1)
+	index_dup = np.insert(index_dup, index_diff+1, index_dup[index_diff]+1)
+
+	arr_no_dups = np.delete(arr,index_dup)
+	if return_dup is False and return_index is False:
+
+		return arr_no_dups
+	elif return_dup is True and return_index is False:
+		duplicates = arr[index_dup]
+
+		return arr_no_dups, duplicates
+	elif return_dup is False and return_index is True:
+        
+		return arr_no_dups, index_dup
+	elif return_dup is True and return_index is True:
+		duplicates = arr[index_dup]
+
+		return arr_no_dups, duplicates, index_dup
 
 def GN_match(IDs_array):
 
@@ -32,9 +65,9 @@ def most_bound(IDs, Group_Length, GNs, N_bound):
 
 	return IDs_most_bound
 
-def Halo_Matcher(tag, SN='033', N_bound = 50, N_part=1024, Sims=None, ref_sim=None, HYDRO=False):
+def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=None, ref_sim=None, output_dir='./'):
 
-	output_dir = '/home/astsstaf/Documents/Work/Simulations/Halo_Catalogues/Halo_Matcher_2p0/'
+	'''Note: this was designed to run for DMONLY BAHAMAS Sims'''
 
 	BAHAMAS = 'BAHAMAS' in tag
 
@@ -43,22 +76,18 @@ def Halo_Matcher(tag, SN='033', N_bound = 50, N_part=1024, Sims=None, ref_sim=No
 		print('Looks like this is a BAHAMAS suite of sims, using different Snapshot notation')
 
 		Snaps = ["%03d"%i for i in np.arange(18,33)][::-1] #snapshots out to z = 3
-		redshifts = np.array([3.0,2.75,2.5,2.25,2.0,1.75,1.5,1.25,1,0.75,0.5,0.375,0.25,0.125,0])[::-1]
+		redshift = np.array([3.0,2.75,2.5,2.25,2.0,1.75,1.5,1.25,1,0.75,0.5,0.375,0.25,0.125,0])[::-1]
 	else:
 		# # Set up a dictionary for snapshots
-		Snaps = ["%03d"%i for i in np.arange(19,34)][::-1] #snapshots out to z = 3
-		redshifts = np.array([3.0,2.75,2.5,2.25,2.0,1.75,1.5,1.25,1,0.75,0.5,0.375,0.25,0.125,0])[::-1]
+		Snaps = [SN]
+		redshifts = np.array([redshift])
 
 	Snapshots = {}
 	for val_i, key in enumerate(Snaps):
-		Snapshots[key] = str(redshifts[val_i])
+		Snapshots[key] = str(redshift[val_i])
 
 	if Sims is None:
-		try:
-			print('Simulation tag is: {}'.format(tag))
-			Sims, SN, colours, sim_labels, plot_labels = get_sim_info(tag)
-		except:
-			raise ValueError('Please provide a valid tag, or a list of Simulation directories.')
+		raise ValueError('Please provide a list of Simulation directories.')
 
 	if Sims is not None and ref_sim is None:
 
