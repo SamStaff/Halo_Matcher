@@ -39,9 +39,9 @@ def duplicate_remover(arr, return_dup=False, return_index=False):
 
 		return arr_no_dups, duplicates, index_dup
 
-def GN_match(IDs_array):
+def GN_match(IDs_array, N_bound):
 
-	matched_Group, _ = stats.mode(Ordered_GNs[IDs_array].reshape(-1,50),axis=1)
+	matched_Group, _ = stats.mode(Ordered_GNs[IDs_array].reshape(-1,N_bound),axis=1)
 
 	return matched_Group
 
@@ -98,169 +98,166 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 		Sims = Sims[1:]
 
 	# Check to see if this halo catalogue already exists:
-	data_avail = False
 	redshift = Snapshots[SN]
 	try:
 		Halo_Catalogue = np.load('{}Halo_Catalogue_{}_z_{}.npy'.format(output_dir, tag, redshift.replace('.','p')))
 		return Halo_Catalogue
 	except:
-		data_avail = False
+		pass
+	
+	h = E.readAttribute('PARTDATA', ref_sim, SN, '/Header/HubbleParam')
+	M_p = E.readAttribute('PARTDATA', ref_sim, SN, '/Header/MassTable')[1] * 1e10 * h**(-1)
+	M = (N_bound + (0.1*N_bound))*M_p
 
-	if data_avail is False:
+	ref_Ordered_GNs = np.ones(N_part**3, dtype=np.int32) * -1
 
-		h = E.readAttribute('PARTDATA', ref_sim, SN, '/Header/HubbleParam')
-		M_p = E.readAttribute('PARTDATA', ref_sim, SN, '/Header/MassTable')[1] * 1e10 * h**(-1)
-		M = (N_bound + (0.1*N_bound))*M_p
+	GNs = np.abs(E.readArray("PARTDATA", ref_sim, SN, '/PartType1/GroupNumber', verbose=False)) -1
+	IDs = E.readArray("PARTDATA", ref_sim, SN, '/PartType1/ParticleIDs', verbose=False) -1
 
-		ref_Ordered_GNs = np.ones(N_part**3, dtype=np.int32) * -1
+	ref_Ordered_GNs[IDs] = GNs
+	del GNs
+	del IDs
 
-		GNs = np.abs(E.readArray("PARTDATA", ref_sim, SN, '/PartType1/GroupNumber', verbose=False)) -1
-		IDs = E.readArray("PARTDATA", ref_sim, SN, '/PartType1/ParticleIDs', verbose=False) -1
+	ref_IDs = E.readArray('SUBFIND_PARTICLES', ref_sim, SN, '/IDs/ParticleID', verbose=False) - 1
+	ref_Group_Length = E.readArray('SUBFIND_GROUP',ref_sim, SN, '/FOF/GroupLength', verbose=False)
+	ref_M200 = E.readArray('SUBFIND_GROUP', ref_sim, SN, '/FOF/Group_M_Crit200', verbose=False) * 1e10
 
-		ref_Ordered_GNs[IDs] = GNs
-		del GNs
-		del IDs
+	index_M200 = np.where(ref_M200>=M)[0]
+	ref_Group_Numbers = index_M200
+	del index_M200
 
-		ref_IDs = E.readArray('SUBFIND_PARTICLES', ref_sim, SN, '/IDs/ParticleID', verbose=False) - 1
-		ref_Group_Length = E.readArray('SUBFIND_GROUP',ref_sim, SN, '/FOF/GroupLength', verbose=False)
-		ref_M200 = E.readArray('SUBFIND_GROUP', ref_sim, SN, '/FOF/Group_M_Crit200', verbose=False) * 1e10
+	# Make 50 most bound particle array for all halos above mass cut in reference sim
+	ref_most_bound = most_bound(ref_IDs, ref_Group_Length, ref_Group_Numbers, N_bound)
 
-		index_M200 = np.where(ref_M200>=M)[0]
-		ref_Group_Numbers = index_M200
-		del index_M200
+	Halo_Catalogue = np.ones((np.max(ref_Group_Numbers)+1, len(Sims)+1), dtype=np.int32) * - 1
+	Halo_Catalogue[:,0] = np.arange(0, np.max(ref_Group_Numbers)+1)
 
-		# Make 50 most bound particle array for all halos above mass cut in reference sim
-		ref_most_bound = most_bound(ref_IDs, ref_Group_Length, ref_Group_Numbers, N_bound)
+	for i, sim in enumerate(tqdm(Sims)):
 
-		Halo_Catalogue = np.ones((np.max(ref_Group_Numbers)+1, len(Sims)+1), dtype=np.int32) * - 1
-		Halo_Catalogue[:,0] = np.arange(0, np.max(ref_Group_Numbers)+1)
+		# Create array to store current Group numbers matching from Sim1 to Sim2
+		Temp_Halo_Catalogue_ref = np.ones((np.max(ref_Group_Numbers)+1, 2), dtype=np.int32) * -1
+		Temp_Halo_Catalogue_ref[:,0] = np.arange(0,np.max(ref_Group_Numbers)+1)
 
-		for i, sim in enumerate(tqdm(Sims)):
+		# Set up an array to be filled in with ordered group numbers
+		match_Ordered_GNs = np.ones(N_part**3, dtype=np.int32) * -1
 
-			# Create array to store current Group numbers matching from Sim1 to Sim2
-			Temp_Halo_Catalogue_ref = np.ones((np.max(ref_Group_Numbers)+1, 2), dtype=np.int32) * -1
-			Temp_Halo_Catalogue_ref[:,0] = np.arange(0,np.max(ref_Group_Numbers)+1)
+		# Read in the particle IDs and Group Numbers of second sim to and fill them in to waiting array
+		global Ordered_GNs
+		match_GNs = np.abs(E.readArray("PARTDATA", sim, SN, '/PartType1/GroupNumber', verbose=False)) -1
+		match_IDs = E.readArray("PARTDATA", sim, SN, '/PartType1/ParticleIDs', verbose=False) -1
+		match_Ordered_GNs[match_IDs] = match_GNs # Ordered by ID
+		Ordered_GNs = match_Ordered_GNs
 
-			# Set up an array to be filled in with ordered group numbers
-			match_Ordered_GNs = np.ones(N_part**3, dtype=np.int32) * -1
+		# Match halos from Sim 1 to Sim 2 and store matches in temporary catalogue
+		Matches = GN_match(ref_most_bound, N_bound)
+		Temp_Halo_Catalogue_ref[ref_Group_Numbers,1] = Matches[:,0]
 
-			# Read in the particle IDs and Group Numbers of second sim to and fill them in to waiting array
-			global Ordered_GNs
-			match_GNs = np.abs(E.readArray("PARTDATA", sim, SN, '/PartType1/GroupNumber', verbose=False)) -1
-			match_IDs = E.readArray("PARTDATA", sim, SN, '/PartType1/ParticleIDs', verbose=False) -1
-			match_Ordered_GNs[match_IDs] = match_GNs # Ordered by ID
-			Ordered_GNs = match_Ordered_GNs
+		del match_GNs
+		del match_IDs
+		del match_Ordered_GNs
+		del Ordered_GNs
+		del Matches
 
-			# Match halos from Sim 1 to Sim 2 and store matches in temporary catalogue
-			Matches = GN_match(ref_most_bound)
-			Temp_Halo_Catalogue_ref[ref_Group_Numbers,1] = Matches[:,0]
+		#####################################################################################
+		# Now match from Sim2 to Sim1
 
-			del match_GNs
-			del match_IDs
-			del match_Ordered_GNs
-			del Ordered_GNs
-			del Matches
+		# Read in particle information
+		match_IDs = E.readArray('SUBFIND_PARTICLES', sim, SN, '/IDs/ParticleID', verbose=False) - 1
+		match_Group_Length = E.readArray('SUBFIND_GROUP',sim, SN, '/FOF/GroupLength', verbose=False)
+		match_M200 = E.readArray('SUBFIND_GROUP', sim, SN, '/FOF/Group_M_Crit200', verbose=False) * 1e10
 
-			#####################################################################################
-			# Now match from Sim2 to Sim1
+		# Find halos above the minimum mass which will contain atleast 50 particles
+		match_Group_Numbers = np.where(match_M200>=M)[0]
 
-			# Read in particle information
-			match_IDs = E.readArray('SUBFIND_PARTICLES', sim, SN, '/IDs/ParticleID', verbose=False) - 1
-			match_Group_Length = E.readArray('SUBFIND_GROUP',sim, SN, '/FOF/GroupLength', verbose=False)
-			match_M200 = E.readArray('SUBFIND_GROUP', sim, SN, '/FOF/Group_M_Crit200', verbose=False) * 1e10
+		# Create array to store current Group numbers and matched group numbers from Sim2 to Sim1
+		Temp_Halo_Catalogue_match = np.ones((np.max(match_Group_Numbers) + 1, 2), dtype=np.int32) * -1
+		Temp_Halo_Catalogue_match[:,1] = np.arange(0,np.max(match_Group_Numbers)+1)
 
-			# Find halos above the minimum mass which will contain atleast 50 particles
-			match_Group_Numbers = np.where(match_M200>=M)[0]
+		# Make 50 most bound particle array for halos in match simulation
+		match_most_bound = most_bound(match_IDs, match_Group_Length, match_Group_Numbers, N_bound)
 
-			# Create array to store current Group numbers and matched group numbers from Sim2 to Sim1
-			Temp_Halo_Catalogue_match = np.ones((np.max(match_Group_Numbers) + 1, 2), dtype=np.int32) * -1
-			Temp_Halo_Catalogue_match[:,1] = np.arange(0,np.max(match_Group_Numbers)+1)
+		# Match halos from Sim2 to ref Sim using most bound particles
+		Ordered_GNs = ref_Ordered_GNs
+		Bi_Matches = GN_match(match_most_bound, N_bound)
 
-			# Make 50 most bound particle array for halos in match simulation
-			match_most_bound = most_bound(match_IDs, match_Group_Length, match_Group_Numbers, N_bound)
+		# Store matches in temporary halo catalogue
+		Temp_Halo_Catalogue_match[match_Group_Numbers,0] = Bi_Matches[:,0]
 
-			# Match halos from Sim2 to ref Sim using most bound particles
-			Ordered_GNs = ref_Ordered_GNs
-			Bi_Matches = GN_match(match_most_bound)
+		# Remove all halos which do not have a match straight away
+		Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[Temp_Halo_Catalogue_ref[:,1] != -1]
+		Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[Temp_Halo_Catalogue_match[:,0] != -1]
 
-			# Store matches in temporary halo catalogue
-			Temp_Halo_Catalogue_match[match_Group_Numbers,0] = Bi_Matches[:,0]
+		#Sort Matched halos by halo number matched to in reference simulation, thus aligning all duplicate matches
+		index_sort = np.argsort(Temp_Halo_Catalogue_match[:,0])
+		Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[index_sort]
 
-			# Remove all halos which do not have a match straight away
-			Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[Temp_Halo_Catalogue_ref[:,1] != -1]
-			Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[Temp_Halo_Catalogue_match[:,0] != -1]
+		#Remove these duplicates from the array to be dealt with later
+		arr, duplicate_matches, index_dupes = duplicate_remover(Temp_Halo_Catalogue_match[:,0], return_dup=True, return_index=True)
+		duplicates_match = Temp_Halo_Catalogue_match[index_dupes]
 
-			#Sort Matched halos by halo number matched to in reference simulation, thus aligning all duplicate matches
-			index_sort = np.argsort(Temp_Halo_Catalogue_match[:,0])
-			Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[index_sort]
+		#Find these matched halos in the reference matching
+		dup_index_ref = np.where(np.isin(Temp_Halo_Catalogue_ref[:,0], Temp_Halo_Catalogue_match[index_dupes,0]))[0]
+		duplicates_ref = Temp_Halo_Catalogue_ref[dup_index_ref]
 
-			#Remove these duplicates from the array to be dealt with later
-			arr, duplicate_matches, index_dupes = duplicate_remover(Temp_Halo_Catalogue_match[:,0], return_dup=True, return_index=True)
-			duplicates_match = Temp_Halo_Catalogue_match[index_dupes]
+		#Now delete from the two matched sets, duplicates from the match, and the corresponding halos in the ref match
+		Temp_Halo_Catalogue_ref = np.delete(Temp_Halo_Catalogue_ref, dup_index_ref, axis=0)
+		Temp_Halo_Catalogue_match = np.delete(Temp_Halo_Catalogue_match, index_dupes, axis=0)
+		del index_dupes
+		del dup_index_ref
+		del arr
+		del index_sort
 
-			#Find these matched halos in the reference matching
-			dup_index_ref = np.where(np.isin(Temp_Halo_Catalogue_ref[:,0], Temp_Halo_Catalogue_match[index_dupes,0]))[0]
-			duplicates_ref = Temp_Halo_Catalogue_ref[dup_index_ref]
+		# Now find which of the reference halos are in both sets of matched halos
+		index_both = np.isin(Temp_Halo_Catalogue_ref[:,0], Temp_Halo_Catalogue_match[:,0])
+		Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[index_both]
+		index_both = np.isin(Temp_Halo_Catalogue_match[:,0], Temp_Halo_Catalogue_ref[:,0])
+		Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[index_both]
 
-			#Now delete from the two matched sets, duplicates from the match, and the corresponding halos in the ref match
-			Temp_Halo_Catalogue_ref = np.delete(Temp_Halo_Catalogue_ref, dup_index_ref, axis=0)
-			Temp_Halo_Catalogue_match = np.delete(Temp_Halo_Catalogue_match, index_dupes, axis=0)
-			del index_dupes
-			del dup_index_ref
-			del arr
-			del index_sort
+		# Find where these arrays are now different and thus have not matched to the same halo Discount these
+		diff = np.subtract(Temp_Halo_Catalogue_ref, Temp_Halo_Catalogue_match)
+		index_diff = np.where(diff[:,1] == 0)[0]
 
-			# Now find which of the reference halos are in both sets of matched halos
-			index_both = np.isin(Temp_Halo_Catalogue_ref[:,0], Temp_Halo_Catalogue_match[:,0])
-			Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[index_both]
-			index_both = np.isin(Temp_Halo_Catalogue_match[:,0], Temp_Halo_Catalogue_ref[:,0])
-			Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[index_both]
+		#Create new catalogue with the complete list
+		Temp_Halo_Catalogue = Temp_Halo_Catalogue_ref[index_diff]
+		del diff
+		del index_diff
+		del index_both
 
-			# Find where these arrays are now different and thus have not matched to the same halo Discount these
-			diff = np.subtract(Temp_Halo_Catalogue_ref, Temp_Halo_Catalogue_match)
-			index_diff = np.where(diff[:,1] == 0)[0]
+		# Now deal with the removed duplicates, set up a new reference temp catalogue, so it has same length as duplicates array
+		index_dupes = np.isin(duplicates_match[:,0], duplicates_ref[:,0])
+		duplicates_match = duplicates_match[index_dupes]
+		index_dupes = np.searchsorted(duplicates_ref[:,0], duplicates_match[:,0])
+		duplicates_ref = duplicates_ref[index_dupes]
 
-			#Create new catalogue with the complete list
-			Temp_Halo_Catalogue = Temp_Halo_Catalogue_ref[index_diff]
-			del diff
-			del index_diff
-			del index_both
+		# Find the indeces where the groups are matched the same bijectively
+		true_match = duplicates_ref[:,1] == duplicates_match[:,1]
+		duplicates = duplicates_ref[true_match]
 
-			# Now deal with the removed duplicates, set up a new reference temp catalogue, so it has same length as duplicates array
-			index_dupes = np.isin(duplicates_match[:,0], duplicates_ref[:,0])
-			duplicates_match = duplicates_match[index_dupes]
-			index_dupes = np.searchsorted(duplicates_ref[:,0], duplicates_match[:,0])
-			duplicates_ref = duplicates_ref[index_dupes]
+		# Update the Temporary halo catalogue to include all halos
+		Temp_Halo_Catalogue = np.vstack((Temp_Halo_Catalogue, duplicates))
 
-			# Find the indeces where the groups are matched the same bijectively
-			true_match = duplicates_ref[:,1] == duplicates_match[:,1]
-			duplicates = duplicates_ref[true_match]
+		# Fill in the Halo catalogue with the matched set
+		Halo_Catalogue[Temp_Halo_Catalogue[:,0],i+1] = Temp_Halo_Catalogue[:,1]
 
-			# Update the Temporary halo catalogue to include all halos
-			Temp_Halo_Catalogue = np.vstack((Temp_Halo_Catalogue, duplicates))
+		del match_IDs
+		del match_Group_Length
+		del match_M200
+		del match_Group_Numbers
+		del match_most_bound
+		del Ordered_GNs
+		del Bi_Matches
+		del Temp_Halo_Catalogue_match
+		del Temp_Halo_Catalogue_ref
+		del Temp_Halo_Catalogue
+		del duplicates
+		del true_match
+		del duplicates_ref
+		del index_dupes
 
-			# Fill in the Halo catalogue with the matched set
-			Halo_Catalogue[Temp_Halo_Catalogue[:,0],i+1] = Temp_Halo_Catalogue[:,1]
+	Halo_Catalogue = np.delete(Halo_Catalogue, np.where(Halo_Catalogue==-1)[0],axis=0)
+	np.save('{}Halo_Catalogue_{}_z_{}'.format(output_dir, tag, redshift.replace('.','p')), Halo_Catalogue)
 
-			del match_IDs
-			del match_Group_Length
-			del match_M200
-			del match_Group_Numbers
-			del match_most_bound
-			del Ordered_GNs
-			del Bi_Matches
-			del Temp_Halo_Catalogue_match
-			del Temp_Halo_Catalogue_ref
-			del Temp_Halo_Catalogue
-			del duplicates
-			del true_match
-			del duplicates_ref
-			del index_dupes
-
-		Halo_Catalogue = np.delete(Halo_Catalogue, np.where(Halo_Catalogue==-1)[0],axis=0)
-		np.save('{}Halo_Catalogue_{}_z_{}'.format(output_dir, tag, redshift.replace('.','p')), Halo_Catalogue)
-
-		return Halo_Catalogue
+	return Halo_Catalogue
 if __name__ == '__main__':
 
 	HC = Halo_Matcher('nrun', N_bound=50)
