@@ -80,7 +80,7 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 	else:
 		# # Set up a dictionary for snapshots
 		Snaps = [SN]
-		redshifts = np.array([redshift])
+		redshift = np.array([redshift])
 
 	Snapshots = {}
 	for val_i, key in enumerate(Snaps):
