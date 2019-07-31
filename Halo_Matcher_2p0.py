@@ -15,9 +15,9 @@ def most_bound(IDs, Group_Length, N_bound):
 	split_bound = np.argmin(Group_Length>=N_bound)
 	Group_Length = Group_Length[:split_bound]
 	IDs = IDs[:np.sum(Group_Length)]
-	index_bound = int_type(np.insert(np.cumsum(Group_Length)[:-1],0,0)[:, None] + np.arange(N_bound))
+	index_bound = np.insert(np.cumsum(Group_Length)[:-1],0,0)[:, None] + np.arange(N_bound)
 
-	return IDs[index_bound.flatten()]
+	return IDs[index_bound.flatten().astype(np.int64)]
 
 def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=None, ref_sim=None, output_dir='./'):
 
@@ -43,7 +43,7 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 			if Sims is None:
 				raise ValueError('Please provide a valid tag, or a list of simulation directories.')
 			else:
-				print('No halo catalogue found with tag:{}'.format(tag))
+				print('No halo catalogue found with tag: {}'.format(tag))
 				print('Generating new halo catalogue')
 
 	if Sims is not None and ref_sim is None:
@@ -65,7 +65,7 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 	ref_Ordered_GNs[IDs] = GNs
 
 	ref_IDs = E.readArray('SUBFIND_PARTICLES', ref_sim, SN, '/IDs/ParticleID', verbose=False) - 1
-	ref_Group_Length = E.readArray('SUBFIND_GROUP',ref_sim, SN, '/FOF/GroupLength', verbose=False)
+	ref_Group_Length = E.readArray('SUBFIND_GROUP', ref_sim, SN, '/FOF/GroupLength', verbose=False)
 
 	# Find halos which contain at least 50 particles in Sim1
 	ref_Group_Numbers = np.where(ref_Group_Length >= N_bound)[0]
@@ -99,7 +99,7 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 		# Now match from Sim2 to Sim1
 		# Read in particle information for Sim2
 		match_IDs = E.readArray('SUBFIND_PARTICLES', sim, SN, '/IDs/ParticleID', verbose=False) - 1
-		match_Group_Length = E.readArray('SUBFIND_GROUP',sim, SN, '/FOF/GroupLength', verbose=False)
+		match_Group_Length = E.readArray('SUBFIND_GROUP', sim, SN, '/FOF/GroupLength', verbose=False)
 
 		# Find halos which contain at least 50 particles in Sim2
 		match_Group_Numbers = np.where(match_Group_Length>=N_bound)[0]
@@ -137,7 +137,7 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 		Halo_Catalogue[Temp_Halo_Catalogue[:,0],i+1] = Temp_Halo_Catalogue[:,1]
 
 	Halo_Catalogue = np.delete(Halo_Catalogue, np.where(Halo_Catalogue==-1)[0],axis=0)
-	np.save('{}Halo_Catalogue_{}_z_{}_test'.format(output_dir, tag, redshift.replace('.','p')), Halo_Catalogue)
+	np.save('{}Halo_Catalogue_{}_z_{}'.format(output_dir, tag, redshift.replace('.','p')), Halo_Catalogue)
 
 	return Halo_Catalogue
 
