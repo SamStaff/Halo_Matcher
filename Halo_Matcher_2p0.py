@@ -20,6 +20,41 @@ def most_bound(IDs, Group_Length, N_bound):
 	return IDs[index_bound.flatten().astype(np.int64)]
 
 def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=None, ref_sim=None, output_dir='./'):
+	
+	'''Return an array of group numbers, which have been matched across Sims.
+	
+	Arguments:
+	tag -- Name for the simulation suite. Used when saving the output matched halo catalogue.
+	
+	Keyword arguments:
+	SN -- snapshot tag required by readEagle when reading in simulation output. Default corresponds to
+	      redshift 0 for a BAHAMAS simulation.
+	redshift -- the redshift of the simulation snapshot being used - must correspond to correct SN.
+		    Default is redshift 0.
+	N_bound -- Number of most bound particles that will be used when matching halos. Default is set to 50.
+	N_part -- Cubed root of particles in the simulation. Default assumes an N1024 simulation.
+	Sims -- List of simulation directories to produce the matched halo catalogue for.
+	ref_sim -- Simulation directory for which simulations in Sims will be matched too. Note, if this
+		   is not set, the first simulation in Sims will be used as ref_sim.
+	output_dir -- Directory where the resultant halo catalogue will be output.
+	
+	Return:
+	Halo_Catalogue -- array with all matched halo numbers wth shape (-1, len(Sims)).
+
+	Method: 
+	This halo matcher uses a bijective matching technique to match halos across simulations.
+	It does this using particle IDs which encode the initial Lagrangian positions of the particles.
+	It matches all halos which have more particles than N_bound from the reference simulation
+	to each simulation in Sims. It then matches back from these simulations to the reference
+	simulation, and keeps all halos which were able to be matched both backwards and forwards.
+
+	The algorithm works primarily by setting up two arrays: Temp_Halo_Catalogue_ref and
+	Temp_Halo_Catalogue_match. The former, holds halo numbers which have been matched from the 
+	reference simulation, to some simulation in Sims. The latter holds halo numbers when matching 
+	back from the simulation to the reference simulation. The columns in these arrays correspond to:
+	column 0: all halo numbers in the reference simulation.
+	column 1: all halo numbers in the matched simulation. s in the matched simulation. 
+	'''
 
 	if 'BAHAMAS' in tag:
 		print('Looks like this is a BAHAMAS suite of sims, using different Snapshot notation')
