@@ -53,7 +53,7 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 	reference simulation, to some simulation in Sims. The latter holds halo numbers when matching 
 	back from the simulation to the reference simulation. The columns in these arrays correspond to:
 	column 0: all halo numbers in the reference simulation.
-	column 1: all halo numbers in the matched simulation. s in the matched simulation. 
+	column 1: all halo numbers in the matched simulation. 
 	'''
 
 	if 'BAHAMAS' in tag:
