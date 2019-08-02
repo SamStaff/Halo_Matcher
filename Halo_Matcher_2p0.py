@@ -4,7 +4,7 @@ from tqdm import tqdm
 import eagle as E
 from scipy import stats
 
-def GN_match(IDs_array,N_bound):
+def GN_match(Ordered_GNs,IDs_array,N_bound):
 
 	matched_Group, _ = stats.mode(Ordered_GNs[IDs_array].reshape(-1,N_bound),axis=1)
 
@@ -19,13 +19,14 @@ def most_bound(IDs, Group_Length, N_bound):
 
 	return IDs[index_bound.flatten().astype(np.int64)]
 
-def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=None, ref_sim=None, output_dir='./'):
-	
+def Halo_Matcher(tag, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, Sims=None,
+				 ref_sim=None, output_dir='./'):
+
 	'''Return an array of group numbers, which have been matched across Sims.
-	
+
 	Arguments:
 	tag -- Name for the simulation suite. Used when saving the output matched halo catalogue.
-	
+
 	Keyword arguments:
 	SN -- snapshot tag required by readEagle when reading in simulation output. Default corresponds to
 	      redshift 0 for a BAHAMAS simulation.
@@ -37,11 +38,13 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 	ref_sim -- Simulation directory for which simulations in Sims will be matched too. Note, if this
 		   is not set, the first simulation in Sims will be used as ref_sim.
 	output_dir -- Directory where the resultant halo catalogue will be output.
-	
-	Return:
-	Halo_Catalogue -- array with all matched halo numbers wth shape (-1, len(Sims)).
 
-	Method: 
+	Return:
+	Catalogues -- A dictionary object, with key: value corresponding to the Snaps in SN: Halo
+			  catalogue generated for that redshift. This halo catalogue is a numpy array with
+			  all matched halo numbers wth shape (-1, len(Sims)).
+
+	Method:
 	This halo matcher uses a bijective matching technique to match halos across simulations.
 	It does this using particle IDs which encode the initial Lagrangian positions of the particles.
 	It matches all halos which have more particles than N_bound from the reference simulation
@@ -49,37 +52,27 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 	simulation, and keeps all halos which were able to be matched both backwards and forwards.
 
 	The algorithm works primarily by setting up two arrays: Temp_Halo_Catalogue_ref and
-	Temp_Halo_Catalogue_match. The former, holds halo numbers which have been matched from the 
-	reference simulation, to some simulation in Sims. The latter holds halo numbers when matching 
+	Temp_Halo_Catalogue_match. The former, holds halo numbers which have been matched from the
+	reference simulation, to some simulation in Sims. The latter holds halo numbers when matching
 	back from the simulation to the reference simulation. The columns in these arrays correspond to:
 	column 0: all halo numbers in the reference simulation.
-	column 1: all halo numbers in the matched simulation. 
+	column 1: all halo numbers in the matched simulation.
 	'''
 
 	if 'BAHAMAS' in tag:
 		print('Looks like this is a BAHAMAS suite of sims, using different Snapshot notation')
-		Snaps = ['%03d'%i for i in np.arange(18,33)][::-1] #snapshots out to z = 3
-		redshifts = np.array([3.0,2.75,2.5,2.25,2.0,1.75,1.5,1.25,1,0.75,0.5,0.375,0.25,0.125,0])[::-1]
+		Snaps = np.array(['%03d'%i for i in np.arange(18,33)])[::-1] #snapshots out to z = 3
+		redshift = np.array([3.0,2.75,2.5,2.25,2.0,1.75,1.5,1.25,1,0.75,0.5,0.375,0.25,0.125,0])[::-1]
 	else:
-		Snaps = [SN]
-		redshift = np.array([redshift])
+		Snaps = np.array([])
+		redshift = np.array([])
+		Snaps = np.append(Snaps,SN)
+		redshift = np.append(redshift, redshifts)
 
 	# Set up a dictionary for snapshots
 	Snapshots = {}
 	for val_i, key in enumerate(Snaps):
 		Snapshots[key] = str(redshift[val_i])
-
-	# Check to see if this halo catalogue already exists:
-	redshift = Snapshots[SN]
-	try:
-		Halo_Catalogue = np.load('{}Halo_Catalogue_{}_z_{}.npy'.format(output_dir, tag, redshift.replace('.','p')))
-		return Halo_Catalogue
-	except(FileNotFoundError):
-			if Sims is None:
-				raise ValueError('Please provide a valid tag, or a list of simulation directories.')
-			else:
-				print('No halo catalogue found with tag: {}'.format(tag))
-				print('Generating new halo catalogue')
 
 	if Sims is not None and ref_sim is None:
 		assert len(Sims) > 1, 'Need at least 2 simulations to form a match'
@@ -92,93 +85,114 @@ def Halo_Matcher(tag, SN='033', redshift=0.0, N_bound = 50, N_part=1024, Sims=No
 	else:
 		int_type = np.int32
 
-	ref_Ordered_GNs = np.ones(N_part**3, dtype=int_type) * -1
+	Catalogues = {}
 
-	GNs = np.abs(E.readArray('PARTDATA', ref_sim, SN, '/PartType1/GroupNumber', verbose=False)) -1
-	IDs = E.readArray('PARTDATA', ref_sim, SN, '/PartType1/ParticleIDs', verbose=False) -1
+	for SN_i in Snaps:
 
-	ref_Ordered_GNs[IDs] = GNs
+		# Check to see if this halo catalogue already exists:
+		redshift = Snapshots[SN_i]
+		try:
+			Halo_Catalogue = np.load('{}Halo_Catalogue_{}_z_{}.npy'.format(output_dir, tag, redshift.replace('.','p')))
+			Catalogues[SN_i] = Halo_Catalogue
+			continue
+		except(FileNotFoundError):
+				if Sims is None:
+					raise ValueError('Please provide a valid tag, or a list of simulation directories.')
+				else:
+					print('No halo catalogue found with tag: {}, at redshift: {}'.format(tag, redshift))
+					print('Generating new halo catalogue')
 
-	ref_IDs = E.readArray('SUBFIND_PARTICLES', ref_sim, SN, '/IDs/ParticleID', verbose=False) - 1
-	ref_Group_Length = E.readArray('SUBFIND_GROUP', ref_sim, SN, '/FOF/GroupLength', verbose=False)
+		ref_Ordered_GNs = np.ones(N_part**3, dtype=int_type) * -1
 
-	# Find halos which contain at least 50 particles in Sim1
-	ref_Group_Numbers = np.where(ref_Group_Length >= N_bound)[0]
+		GNs = np.abs(E.readArray('PARTDATA', ref_sim, SN_i, '/PartType1/GroupNumber', verbose=False)) -1
+		IDs = E.readArray('PARTDATA', ref_sim, SN_i, '/PartType1/ParticleIDs', verbose=False) -1
 
-	# Make array of N_bound most bound particle in Sim1
-	ref_most_bound = most_bound(ref_IDs, ref_Group_Length, N_bound)
+		ref_Ordered_GNs[IDs] = GNs
 
-	Halo_Catalogue = np.ones((np.max(ref_Group_Numbers)+1, len(Sims)+1), dtype=int_type) * - 1
-	Halo_Catalogue[:,0] = np.arange(0, np.max(ref_Group_Numbers)+1)
+		ref_IDs = E.readArray('SUBFIND_PARTICLES', ref_sim, SN_i, '/IDs/ParticleID', verbose=False) - 1
+		ref_Group_Length = E.readArray('SUBFIND_GROUP', ref_sim, SN_i, '/FOF/GroupLength', verbose=False)
 
-	for i, sim in enumerate(tqdm(Sims)):
-		# Match from Sim1 to Sim2
-		# Create array to store current Group Numbers matching from Sim1 to Sim2
-		Temp_Halo_Catalogue_ref = np.ones((np.max(ref_Group_Numbers)+1, 2), dtype=int_type) * -1
-		Temp_Halo_Catalogue_ref[:,0] = np.arange(0,np.max(ref_Group_Numbers)+1)
+		# Find halos which contain at least 50 particles in Sim1
+		ref_Group_Numbers = np.where(ref_Group_Length >= N_bound)[0]
 
-		# Set up an array to be filled in with ordered group numbers
-		match_Ordered_GNs = np.ones(N_part**3, dtype=int_type) * -1
+		# Make array of N_bound most bound particle in Sim1
+		ref_most_bound = most_bound(ref_IDs, ref_Group_Length, N_bound)
 
-		# Read in the particle IDs and Group Numbers of Sim2
-		global Ordered_GNs
-		match_GNs = np.abs(E.readArray('PARTDATA', sim, SN, '/PartType1/GroupNumber', verbose=False)) -1
-		match_IDs = E.readArray('PARTDATA', sim, SN, '/PartType1/ParticleIDs', verbose=False) -1
-		match_Ordered_GNs[match_IDs] = match_GNs # Ordered by ID
-		Ordered_GNs = match_Ordered_GNs
+		Halo_Catalogue = np.ones((np.max(ref_Group_Numbers)+1, len(Sims)+1), dtype=int_type) * - 1
+		Halo_Catalogue[:,0] = np.arange(0, np.max(ref_Group_Numbers)+1)
 
-		# Match halos from Sim1 to Sim2 and store matches in temporary catalogue
-		Matches = GN_match(ref_most_bound, N_bound)
-		Temp_Halo_Catalogue_ref[ref_Group_Numbers,1] = Matches[:,0]
+		for i, sim in enumerate(tqdm(Sims)):
+			# Match from Sim1 to Sim2
+			# Create array to store current Group Numbers matching from Sim1 to Sim2
+			Temp_Halo_Catalogue_ref = np.ones((np.max(ref_Group_Numbers)+1, 2), dtype=int_type) * -1
+			Temp_Halo_Catalogue_ref[:,0] = np.arange(0,np.max(ref_Group_Numbers)+1)
 
-		# Now match from Sim2 to Sim1
-		# Read in particle information for Sim2
-		match_IDs = E.readArray('SUBFIND_PARTICLES', sim, SN, '/IDs/ParticleID', verbose=False) - 1
-		match_Group_Length = E.readArray('SUBFIND_GROUP', sim, SN, '/FOF/GroupLength', verbose=False)
+			# Set up an array to be filled in with ordered group numbers
+			match_Ordered_GNs = np.ones(N_part**3, dtype=int_type) * -1
 
-		# Find halos which contain at least 50 particles in Sim2
-		match_Group_Numbers = np.where(match_Group_Length>=N_bound)[0]
+			# Read in the particle IDs and Group Numbers of Sim2
+			match_GNs = np.abs(E.readArray('PARTDATA', sim, SN_i, '/PartType1/GroupNumber', verbose=False)) -1
+			match_IDs = E.readArray('PARTDATA', sim, SN_i, '/PartType1/ParticleIDs', verbose=False) -1
+			match_Ordered_GNs[match_IDs] = match_GNs # Ordered by ID
 
-		# Create array to store current Group numbers and matched Group Numbers from Sim2 to Sim1
-		Temp_Halo_Catalogue_match = np.ones((np.max(match_Group_Numbers) + 1, 2), dtype=int_type) * -1
-		Temp_Halo_Catalogue_match[:,1] = np.arange(0,np.max(match_Group_Numbers)+1)
+			# Match halos from Sim1 to Sim2 and store matches in temporary catalogue
+			Matches = GN_match(match_Ordered_GNs, ref_most_bound, N_bound)
+			Temp_Halo_Catalogue_ref[ref_Group_Numbers,1] = Matches[:,0]
 
-		# Make N_bound most bound particle array for halos in Sim2
-		match_most_bound = most_bound(match_IDs, match_Group_Length, N_bound)
+			# Now match from Sim2 to Sim1
+			# Read in particle information for Sim2
+			match_IDs = E.readArray('SUBFIND_PARTICLES', sim, SN_i, '/IDs/ParticleID', verbose=False) - 1
+			match_Group_Length = E.readArray('SUBFIND_GROUP', sim, SN_i, '/FOF/GroupLength', verbose=False)
 
-		# Match halos from Sim2 to Sim1 using most bound particles
-		Ordered_GNs = ref_Ordered_GNs
-		Bi_Matches = GN_match(match_most_bound, N_bound)
+			# Find halos which contain at least 50 particles in Sim2
+			match_Group_Numbers = np.where(match_Group_Length>=N_bound)[0]
 
-		# Store matches in temporary halo catalogue
-		Temp_Halo_Catalogue_match[match_Group_Numbers,0] = Bi_Matches[:,0]
+			# Create array to store current Group numbers and matched Group Numbers from Sim2 to Sim1
+			Temp_Halo_Catalogue_match = np.ones((np.max(match_Group_Numbers) + 1, 2), dtype=int_type) * -1
+			Temp_Halo_Catalogue_match[:,1] = np.arange(0,np.max(match_Group_Numbers)+1)
 
-		# Match between the halo catalogues of Sim1 and Sim2
-		# Remove all halos which do not have a match straight away
-		Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[Temp_Halo_Catalogue_ref[:,1] != -1]
-		Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[Temp_Halo_Catalogue_match[:,0] != -1]
+			# Make N_bound most bound particle array for halos in Sim2
+			match_most_bound = most_bound(match_IDs, match_Group_Length, N_bound)
 
-		# Now find which of the reference halos are in both sets of matched halos
-		index_both = np.isin(Temp_Halo_Catalogue_match[:,0], Temp_Halo_Catalogue_ref[:,0])
-		Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[index_both]
+			# Match halos from Sim2 to Sim1 using most bound particles
+			Bi_Matches = GN_match(ref_Ordered_GNs, match_most_bound, N_bound)
 
-		# Construct a common set of halos across the two simulations
-		index_array = np.searchsorted(Temp_Halo_Catalogue_ref[:,0], Temp_Halo_Catalogue_match[:,0])
-		Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[index_array]
-		true_match = Temp_Halo_Catalogue_ref[:,1] == Temp_Halo_Catalogue_match[:,1]
-		Temp_Halo_Catalogue = Temp_Halo_Catalogue_ref[true_match]
+			# Store matches in temporary halo catalogue
+			Temp_Halo_Catalogue_match[match_Group_Numbers,0] = Bi_Matches[:,0]
 
-		# Fill in the Halo catalogue with the matched set
-		Halo_Catalogue[Temp_Halo_Catalogue[:,0],i+1] = Temp_Halo_Catalogue[:,1]
+			# Match between the halo catalogues of Sim1 and Sim2
+			# Remove all halos which do not have a match straight away
+			Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[Temp_Halo_Catalogue_ref[:,1] != -1]
+			Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[Temp_Halo_Catalogue_match[:,0] != -1]
 
-	Halo_Catalogue = np.delete(Halo_Catalogue, np.where(Halo_Catalogue==-1)[0],axis=0)
-	np.save('{}Halo_Catalogue_{}_z_{}'.format(output_dir, tag, redshift.replace('.','p')), Halo_Catalogue)
+			# Now find which of the reference halos are in both sets of matched halos
+			index_both = np.isin(Temp_Halo_Catalogue_match[:,0], Temp_Halo_Catalogue_ref[:,0])
+			Temp_Halo_Catalogue_match = Temp_Halo_Catalogue_match[index_both]
 
-	return Halo_Catalogue
+			# Construct a common set of halos across the two simulations
+			index_array = np.searchsorted(Temp_Halo_Catalogue_ref[:,0], Temp_Halo_Catalogue_match[:,0])
+			Temp_Halo_Catalogue_ref = Temp_Halo_Catalogue_ref[index_array]
+			true_match = Temp_Halo_Catalogue_ref[:,1] == Temp_Halo_Catalogue_match[:,1]
+			Temp_Halo_Catalogue = Temp_Halo_Catalogue_ref[true_match]
+
+			# Fill in the Halo catalogue with the matched set
+			Halo_Catalogue[Temp_Halo_Catalogue[:,0],i+1] = Temp_Halo_Catalogue[:,1]
+
+		Halo_Catalogue = np.delete(Halo_Catalogue, np.where(Halo_Catalogue==-1)[0],axis=0)
+		np.save('{}Halo_Catalogue_{}_z_{}'.format(output_dir, tag, redshift.replace('.','p')), Halo_Catalogue)
+
+		Catalogues[SN_i] = Halo_Catalogue
+
+	return Catalogues
 
 
 if __name__ == '__main__':
 
-	tag = 'test'
-	HC = Halo_Matcher(tag, N_part=1024, N_bound=50)
-	print(HC)
+	SN = ['033', '027', '023']
+	z = [0.0, 1.0, 2.0]
+	tag = 'L100N256'
+	Sim_path = '/path/to/sim/suite/'
+	suite_tags = ['sim1','sim2','sim3','sim4','sim5']
+
+	HC = Halo_Matcher(tag, SN=SN, redshifts=z, Sims = [Sim_path+i+'/data/' for i in suite_tags], N_part=256, N_bound=50)
+	print(HC[SN[0]])
