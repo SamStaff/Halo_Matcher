@@ -19,16 +19,14 @@ def most_bound(IDs, Group_Length, N_bound):
 
 	return IDs[index_bound.flatten().astype(np.int64)]
 
-def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, tag='', output_dir='./'):
+def Halo_Matcher(sims, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, tag='', output_dir='./'):
 
-	'''Return an array of group numbers, which have been matched across Sims.
+	'''Return an array of group numbers, which have been matched across sims.
 
 	Arguments:
-	Sims -- List of simulation directories to produce the matched halo catalogue for.
+	sims -- List of simulation directories to produce the matched halo catalogue for.
 	
 	Keyword arguments:
-	ref_sim -- Element of Sims for which simulations in Sims will be matched too. Note, by default this is
-		   set to the first element of Sims.
 	SN -- snapshot tag required by readEagle when reading in simulation output. Default corresponds to
 	      redshift 0 for a BAHAMAS simulation.
 	redshift -- the redshift of the simulation snapshot being used - must correspond to correct SN.
@@ -41,18 +39,19 @@ def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=
 	Return:
 	Catalogues -- A dictionary object, with key: value corresponding to the Snaps in SN: Halo
 			  catalogue generated for that redshift. This halo catalogue is a numpy array with
-			  all matched halo numbers wth shape (-1, len(Sims)).
+			  all matched halo numbers wth shape (-1, len(sims)).
 
 	Method:
 	This halo matcher uses a bijective matching technique to match halos across simulations.
 	It does this using particle IDs which encode the initial Lagrangian positions of the particles.
 	It matches all halos which have more particles than N_bound from the reference simulation
-	to each simulation in Sims. It then matches back from these simulations to the reference
+	to each simulation in sims. Note, that the reference simulation is assumed to be the first element of
+	the sims list. It then matches back from these simulations to the reference
 	simulation, and keeps all halos which were able to be matched both backwards and forwards.
 
 	The algorithm works primarily by setting up two arrays: Temp_Halo_Catalogue_ref and
 	Temp_Halo_Catalogue_match. The former, holds halo numbers which have been matched from the
-	reference simulation, to some simulation in Sims. The latter holds halo numbers when matching
+	reference simulation, to some simulation in sims. The latter holds halo numbers when matching
 	back from the simulation to the reference simulation. The columns in these arrays correspond to:
 	column 0: all halo numbers in the reference simulation.
 	column 1: all halo numbers in the matched simulation.
@@ -73,9 +72,10 @@ def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=
 	for val_i, key in enumerate(Snaps):
 		Snapshots[key] = str(redshift[val_i])
 
-	assert len(Sims) > 1, 'Need at least 2 simulations to form a match'
-	Sims = np.array(Sims)
-	Sims = np.delete(Sims, ref_sim)
+	assert len(sims) > 1, 'Need at least 2 simulations to form a match'
+	sims = np.array(sims)
+	sim_ref = sims[0]
+	sims = sims[1:]
 
 	if N_part > 1024:
 		int_type = np.int64
@@ -93,7 +93,7 @@ def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=
 			Catalogues[SN_i] = Halo_Catalogue
 			continue
 		except(FileNotFoundError):
-				if Sims is None:
+				if sims is None:
 					raise ValueError('Please provide a valid tag, or a list of simulation directories.')
 				else:
 					print('No halo catalogue found with tag: {}, at redshift: {}'.format(tag, redshift))
@@ -101,13 +101,13 @@ def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=
 
 		ref_Ordered_GNs = np.ones(N_part**3, dtype=int_type) * -1
 
-		GNs = np.abs(E.readArray('PARTDATA', Sims[ref_sim], SN_i, '/PartType1/GroupNumber', verbose=False)) -1
-		IDs = E.readArray('PARTDATA', Sims[ref_sim], SN_i, '/PartType1/ParticleIDs', verbose=False) -1
+		GNs = np.abs(E.readArray('PARTDATA', sim_ref, SN_i, '/PartType1/GroupNumber', verbose=False)) -1
+		IDs = E.readArray('PARTDATA', sim_ref, SN_i, '/PartType1/ParticleIDs', verbose=False) -1
 
 		ref_Ordered_GNs[IDs] = GNs
 
-		ref_IDs = E.readArray('SUBFIND_PARTICLES', Sims[ref_sim], SN_i, '/IDs/ParticleID', verbose=False) - 1
-		ref_Group_Length = E.readArray('SUBFIND_GROUP', Sims[ref_sim], SN_i, '/FOF/GroupLength', verbose=False)
+		ref_IDs = E.readArray('SUBFIND_PARTICLES', sim_ref, SN_i, '/IDs/ParticleID', verbose=False) - 1
+		ref_Group_Length = E.readArray('SUBFIND_GROUP', sim_ref, SN_i, '/FOF/GroupLength', verbose=False)
 
 		# Find halos which contain at least 50 particles in Sim1
 		ref_Group_Numbers = np.where(ref_Group_Length >= N_bound)[0]
@@ -115,10 +115,10 @@ def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=
 		# Make array of N_bound most bound particle in Sim1
 		ref_most_bound = most_bound(ref_IDs, ref_Group_Length, N_bound)
 
-		Halo_Catalogue = np.ones((np.max(ref_Group_Numbers)+1, len(Sims)+1), dtype=int_type) * - 1
+		Halo_Catalogue = np.ones((np.max(ref_Group_Numbers)+1, len(sims)+1), dtype=int_type) * - 1
 		Halo_Catalogue[:,0] = np.arange(0, np.max(ref_Group_Numbers)+1)
 
-		for i, sim in enumerate(tqdm(Sims)):
+		for i, sim in enumerate(tqdm(sims)):
 			# Match from Sim1 to Sim2
 			# Create array to store current Group Numbers matching from Sim1 to Sim2
 			Temp_Halo_Catalogue_ref = np.ones((np.max(ref_Group_Numbers)+1, 2), dtype=int_type) * -1
