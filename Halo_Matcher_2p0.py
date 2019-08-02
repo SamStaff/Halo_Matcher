@@ -19,24 +19,23 @@ def most_bound(IDs, Group_Length, N_bound):
 
 	return IDs[index_bound.flatten().astype(np.int64)]
 
-def Halo_Matcher(tag, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, Sims=None,
-				 ref_sim=None, output_dir='./'):
+def Halo_Matcher(Sims, ref_sim=0, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, tag='', output_dir='./'):
 
 	'''Return an array of group numbers, which have been matched across Sims.
 
 	Arguments:
-	tag -- Name for the simulation suite. Used when saving the output matched halo catalogue.
-
+	Sims -- List of simulation directories to produce the matched halo catalogue for.
+	
 	Keyword arguments:
+	ref_sim -- Element of Sims for which simulations in Sims will be matched too. Note, by default this is
+		   set to the first element of Sims.
 	SN -- snapshot tag required by readEagle when reading in simulation output. Default corresponds to
 	      redshift 0 for a BAHAMAS simulation.
 	redshift -- the redshift of the simulation snapshot being used - must correspond to correct SN.
 		    Default is redshift 0.
 	N_bound -- Number of most bound particles that will be used when matching halos. Default is set to 50.
 	N_part -- Cubed root of particles in the simulation. Default assumes an N1024 simulation.
-	Sims -- List of simulation directories to produce the matched halo catalogue for.
-	ref_sim -- Simulation directory for which simulations in Sims will be matched too. Note, if this
-		   is not set, the first simulation in Sims will be used as ref_sim.
+	tag -- Name for the simulation suite. Used when saving the output matched halo catalogue.
 	output_dir -- Directory where the resultant halo catalogue will be output.
 
 	Return:
@@ -74,11 +73,9 @@ def Halo_Matcher(tag, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, Sims=N
 	for val_i, key in enumerate(Snaps):
 		Snapshots[key] = str(redshift[val_i])
 
-	if Sims is not None and ref_sim is None:
-		assert len(Sims) > 1, 'Need at least 2 simulations to form a match'
-		ref_sim = Sims[0]
-		print('Note: ref_sim was not specified. Using first simulation in list.')
-		Sims = Sims[1:]
+	assert len(Sims) > 1, 'Need at least 2 simulations to form a match'
+	Sims = np.array(Sims)
+	Sims = np.delete(Sims, ref_sim)
 
 	if N_part > 1024:
 		int_type = np.int64
@@ -104,13 +101,13 @@ def Halo_Matcher(tag, SN='033', redshifts=0.0, N_bound = 50, N_part=1024, Sims=N
 
 		ref_Ordered_GNs = np.ones(N_part**3, dtype=int_type) * -1
 
-		GNs = np.abs(E.readArray('PARTDATA', ref_sim, SN_i, '/PartType1/GroupNumber', verbose=False)) -1
-		IDs = E.readArray('PARTDATA', ref_sim, SN_i, '/PartType1/ParticleIDs', verbose=False) -1
+		GNs = np.abs(E.readArray('PARTDATA', Sims[ref_sim], SN_i, '/PartType1/GroupNumber', verbose=False)) -1
+		IDs = E.readArray('PARTDATA', Sims[ref_sim], SN_i, '/PartType1/ParticleIDs', verbose=False) -1
 
 		ref_Ordered_GNs[IDs] = GNs
 
-		ref_IDs = E.readArray('SUBFIND_PARTICLES', ref_sim, SN_i, '/IDs/ParticleID', verbose=False) - 1
-		ref_Group_Length = E.readArray('SUBFIND_GROUP', ref_sim, SN_i, '/FOF/GroupLength', verbose=False)
+		ref_IDs = E.readArray('SUBFIND_PARTICLES', Sims[ref_sim], SN_i, '/IDs/ParticleID', verbose=False) - 1
+		ref_Group_Length = E.readArray('SUBFIND_GROUP', Sims[ref_sim], SN_i, '/FOF/GroupLength', verbose=False)
 
 		# Find halos which contain at least 50 particles in Sim1
 		ref_Group_Numbers = np.where(ref_Group_Length >= N_bound)[0]
