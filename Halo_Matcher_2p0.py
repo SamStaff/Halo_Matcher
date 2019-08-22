@@ -170,7 +170,6 @@ def halo_matcher(sims, SN='033', n_bound = 50, tag='', output_dir='./'):
 
 
 if __name__ == '__main__':
-
 	SN = ['033', '027', '023']
 	tag = 'L100N256'
 	sim_path = '/path/to/sim/suite/'
