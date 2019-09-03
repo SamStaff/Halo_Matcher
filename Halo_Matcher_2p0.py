@@ -314,4 +314,4 @@ if __name__ == '__main__':
     for i, sim in enumerate(tqdm(sim_dirs)):
 	''' Here you need to enable the redshift_tracker flag, to tell the matcher you are matching back in redshift.
 	You also need to give it a start and an end snapshot.'''
-        HC = Halo_Matcher(sim, ['023','033'], n_bound=50, tag = tags[i],redshift_tracker=True)
+        HC = Halo_Matcher(sim, ['023','033'], n_bound=50, tag = suite_tags[i],redshift_tracker=True)
