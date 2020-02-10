@@ -1,14 +1,14 @@
 import numpy as np
 import time
 from tqdm import tqdm
-import eagle3 as E
+import eagle as E
 from scipy import stats
 
-def GN_match(ordered_GNs,IDs_array,n_bound):
+def GN_match(ordered_GNs, IDs_array, n_bound):
 
     '''Function to return the matching group number to a halo.'''
 
-    matched_group, _ = stats.mode(ordered_GNs[IDs_array].reshape(-1,n_bound),axis=1)
+    matched_group, _ = stats.mode(ordered_GNs[IDs_array].reshape(-1,n_bound), axis=1)
 
     return matched_group
 
@@ -23,10 +23,11 @@ def most_bound(IDs, group_length, n_bound):
                in order to match the halos.
     '''
 
-    split_bound = np.argmin(group_length>=n_bound)
-    group_length = group_length[:split_bound]
+    last_bound = len(group_length) - np.argmax(group_length[::-1]>=n_bound)
+    group_length = group_length[:last_bound]
     IDs = IDs[:np.sum(group_length)]
     index_bound = np.insert(np.cumsum(group_length)[:-1],0,0)[:, None] + np.arange(n_bound)
+    index_bound = index_bound[group_length>=n_bound]
 
     return IDs[index_bound.flatten().astype(np.int64)]
 
@@ -64,11 +65,12 @@ def halo_matcher(ref_group_numbers, ref_ordered_GNs, ref_most_bound, match_order
     temp_halo_catalogue_ref[:,0] = np.arange(0,np.max(ref_group_numbers)+1)
 
     # Read in the particle IDs and Group Numbers of Sim2
-    match_GNs = np.abs(E.readArray('PARTDATA', sim_match, SN_i, '/PartType1/GroupNumber', verbose=verbose)) -1
-    match_IDs = E.readArray('PARTDATA', sim_match, SN_i, '/PartType1/ParticleIDs', verbose=verbose) -1
-    
+    match_GNs = np.abs(E.readArray('PARTDATA', sim_match, SN_i, '/PartType1/GroupNumber', verbose=verbose)) - 1
+    match_IDs = E.readArray('PARTDATA', sim_match, SN_i, '/PartType1/ParticleIDs', verbose=verbose).astype(int_type) - 1
+
     # Remove hydro particle IDs and normalise the dm particle IDs 
     if match_hydro:
+        match_IDs = match_IDs
         match_IDs -= n_part
         index_pos = match_IDs > 0
         match_ordered_GNs[match_IDs[index_pos]] = match_GNs[index_pos] # Ordered by ID
@@ -81,13 +83,14 @@ def halo_matcher(ref_group_numbers, ref_ordered_GNs, ref_most_bound, match_order
 
     # Now match from Sim2 to Sim1
     # First read in particle information for Sim2
-    match_IDs = E.readArray('SUBFIND_PARTICLES', sim_match, SN_i, '/IDs/ParticleID', verbose=verbose) - 1
-    match_group_length = E.readArray('SUBFIND_GROUP', sim_match, SN_i, '/FOF/GroupLength', verbose=verbose)
+    match_IDs = E.readArray('SUBFIND_PARTICLES', sim_match, SN_i, '/IDs/ParticleID', verbose=verbose).astype(int_type) - 1
+    match_group_length = E.readArray('SUBFIND_GROUP', sim_match, SN_i, '/FOF/GroupLength', verbose=verbose).astype(int_type)
 
     # Remove hydro particle IDs from SUBFIND and correct group lengths
     if match_hydro:
+        match_IDs = match_IDs.astype(np.int64)
         match_IDs -= n_part
-        match_group_length = np.add.reduceat(match_IDs>0, np.hstack([0,np.cumsum(match_group_length)[:-1]]).astype(np.int64))
+        match_group_length = np.add.reduceat(match_IDs>0, np.hstack([0,np.cumsum(match_group_length)[:-1]]))
         match_IDs = match_IDs[match_IDs>0]
 
     # Find halos which contain at least 50 particles in Sim2
@@ -101,7 +104,7 @@ def halo_matcher(ref_group_numbers, ref_ordered_GNs, ref_most_bound, match_order
     match_most_bound = most_bound(match_IDs, match_group_length, n_bound)
 
     # Match halos from Sim2 to Sim1 using most bound particles
-    bi_matches = GN_match(ref_ordered_GNs, match_most_bound, n_bound)
+    bi_matches = GN_match(ref_ordered_GNs.astype(np.int64), match_most_bound, n_bound)
 
     # Store matches in temporary halo catalogue
     temp_halo_catalogue_match[match_group_numbers,0] = bi_matches[:,0]
@@ -143,8 +146,8 @@ def Halo_Matcher(sims, SN='033', n_bound = 50, tag='', output_dir='./', redshift
     output_dir -- Directory where the resultant halo catalogue will be output.
     Return:
     catalogues -- A dictionary object, with key: value corresponding to the snaps in SN: Halo
-    		  catalogue generated for that redshift. This halo catalogue is a numpy array with
-    		  all matched halo numbers wth shape (-1, len(sims)).
+              catalogue generated for that redshift. This halo catalogue is a numpy array with
+              all matched halo numbers wth shape (-1, len(sims)).
     Method:
     This halo matcher uses a bijective matching technique to match halos across simulations.
     It does this using particle IDs which encode the initial Lagrangian positions of the particles.
@@ -170,10 +173,10 @@ def Halo_Matcher(sims, SN='033', n_bound = 50, tag='', output_dir='./', redshift
         n_part = E.readAttribute('SNAPSHOT', sims, snaps[0], '/Header/NumPart_Total')[1]
 
     global int_type
-    if n_part > np.power(1024,3):
-    	int_type = np.int64
+    if n_part >= np.power(1024,3):
+        int_type = np.int64
     else:
-    	int_type = np.int32
+        int_type = np.int32
 
 
     if redshift_tracker is False:
@@ -192,10 +195,11 @@ def Halo_Matcher(sims, SN='033', n_bound = 50, tag='', output_dir='./', redshift
             try:
                 halo_catalogue = np.load('{}Halo_Catalogue_{}_z_{}.npy'.format(output_dir, tag, str(redshift).replace('.','p')))
                 catalogues[SN_i] = halo_catalogue
+                print('Existing halo catalogue found: {}Halo_Catalogue_{}_z_{}.npy'.format(output_dir, tag, str(redshift).replace('.','p')))
                 continue
             except(FileNotFoundError):
                 if sims is None:
-                    raise ValueError('Please provide a list of simulation directories.')
+                    raise ValueError('Please provide a list of simulation directories')
                 else:
                     print('No halo catalogue found with tag: {}, at redshift: {}'.format(tag, redshift))
                     print('Generating new halo catalogue')
@@ -205,21 +209,20 @@ def Halo_Matcher(sims, SN='033', n_bound = 50, tag='', output_dir='./', redshift
             match_ordered_GNs = np.ones(n_part, dtype=int_type) * -1
 
             GNs = np.abs(E.readArray('PARTDATA', sim_ref, SN_i, '/PartType1/GroupNumber', verbose=verbose)) -1
-            IDs = E.readArray('PARTDATA', sim_ref, SN_i, '/PartType1/ParticleIDs', verbose=verbose) -1
+            IDs = E.readArray('PARTDATA', sim_ref, SN_i, '/PartType1/ParticleIDs', verbose=verbose).astype(int_type) -1
 
             ref_hydro = E.readAttribute('SNAPSHOT', sim_ref, SN_i, '/Header/NumPart_Total')[0] > 0
-            ref_IDs = E.readArray('SUBFIND_PARTICLES', sim_ref, SN_i, '/IDs/ParticleID', verbose=verbose) - 1
-            ref_group_length = E.readArray('SUBFIND_GROUP', sim_ref, SN_i, '/FOF/GroupLength', verbose=verbose)
+            ref_IDs = E.readArray('SUBFIND_PARTICLES', sim_ref, SN_i, '/IDs/ParticleID', verbose=verbose).astype(int_type) - 1
+            ref_group_length = E.readArray('SUBFIND_GROUP', sim_ref, SN_i, '/FOF/GroupLength', verbose=verbose).astype(int_type)
 
             # Remove hydro particle IDs and normalise the dm particle IDs 
             if ref_hydro:
                 IDs -= n_part
-                index_pos = IDs > 0
-                ref_ordered_GNs[IDs[index_pos]] = GNs[index_pos]
+                ref_ordered_GNs[IDs[IDs > 0]] = GNs[IDs > 0]
 
                 # Remove hydro particle IDs from SUBFIND and correct group lengths
                 ref_IDs -= n_part
-                ref_group_length = np.add.reduceat(ref_IDs>0, np.hstack([0,np.cumsum(ref_group_length)[:-1]]).astype(np.int64))
+                ref_group_length = np.add.reduceat(ref_IDs>0, np.hstack([0,np.cumsum(ref_group_length)[:-1]]))
                 ref_IDs = ref_IDs[ref_IDs>0]
             else: 
                 ref_ordered_GNs[IDs] = GNs
@@ -272,15 +275,27 @@ def Halo_Matcher(sims, SN='033', n_bound = 50, tag='', output_dir='./', redshift
                 ref_ordered_GNs = np.ones(n_part, dtype=int_type) * -1
 
                 # Read in the reference particles information, which are going to be matched to
-                GNs = np.abs(E.readArray('PARTDATA', sims, SN_ref, '/PartType1/GroupNumber', verbose=verbose)) -1
-                IDs = E.readArray('PARTDATA', sims, SN_ref, '/PartType1/ParticleIDs', verbose=verbose) -1
-                ref_ordered_GNs[IDs] = GNs
+                GNs = np.abs(E.readArray('PARTDATA', sims, SN_ref, '/PartType1/GroupNumber', verbose=verbose)) - 1
+                IDs = E.readArray('PARTDATA', sims, SN_ref, '/PartType1/ParticleIDs', verbose=verbose).astype(int_type) - 1
 
                 ''' Read in the reference particles information. This reads particles in so that they are ordered
                 by their group number, i.e. biggest group to smallest group, and from most bound to least bound
                 inside a group'''
-                ref_IDs = E.readArray('SUBFIND_PARTICLES', sims, SN_ref, '/IDs/ParticleID', verbose=verbose) - 1
-                ref_group_length = E.readArray('SUBFIND_GROUP', sims, SN_ref, '/FOF/GroupLength', verbose=verbose)
+                ref_hydro = E.readAttribute('SNAPSHOT', sim_ref, SN_i, '/Header/NumPart_Total')[0] > 0
+                ref_IDs = E.readArray('SUBFIND_PARTICLES', sims, SN_ref, '/IDs/ParticleID', verbose=verbose).astype(int_type) - 1
+                ref_group_length = E.readArray('SUBFIND_GROUP', sims, SN_ref, '/FOF/GroupLength', verbose=verbose).astype(int_type)
+
+                # Remove hydro particle IDs and normalise the dm particle IDs 
+                if ref_hydro:
+                    IDs -= n_part
+                    ref_ordered_GNs[IDs[IDs > 0]] = GNs[IDs > 0]
+
+                    # Remove hydro particle IDs from SUBFIND and correct group lengths
+                    ref_IDs -= n_part
+                    ref_group_length = np.add.reduceat(ref_IDs>0, np.hstack([0,np.cumsum(ref_group_length)[:-1]]))
+                    ref_IDs = ref_IDs[ref_IDs>0]
+                else: 
+                    ref_ordered_GNs[IDs] = GNs
 
                 # Find halos which contain at least 50 particles in Sim1
                 ref_group_numbers = np.where(ref_group_length >= n_bound)[0]
@@ -336,11 +351,11 @@ if __name__ == '__main__':
     similar to this would be used.'''
     HC = halo_matcher(sims = [sim_path+i+'/data/' for i in suite_tags], SN[0], n_bound=50, tag=tag)
     print(HC[SN[0]])
-
+    
     '''You can also make a redshift catalogue for a halo, which will give you back the group number
     of the progenitor which contained the most of n_bound particles. This can be done via the following:'''
     sim_dirs = [sim_path+i+'/data/' for i in suite_tags]
     for i, sim in enumerate(tqdm(sim_dirs)):
-        ''' Here you need to enable the redshift_tracker flag, to tell the matcher you are matching back in redshift.
-        You also need to give it a start and an end snapshot.'''
+    ''' Here you need to enable the redshift_tracker flag, to tell the matcher you are matching back in redshift.
+    You also need to give it a start and an end snapshot.'''
         HC = Halo_Matcher(sim, ['023','033'], n_bound=50, tag = suite_tags[i],redshift_tracker=True)
